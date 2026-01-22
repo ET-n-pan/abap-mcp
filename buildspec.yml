@@ -17,7 +17,6 @@ phases:
   pre_build:
     commands:
       - export ECR_REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME"
-      - echo "ECR_REPO=$ECR_REPO"
       - echo Logging in to ECR...
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO
       - echo Fetching LFS files...
@@ -26,12 +25,6 @@ phases:
       - echo Loading ABAP Accelerator image...
       - docker load -i abap-accelerator-q-3.2.1-node22.tar
       - docker images
-      - echo Extracting app files...
-      - mkdir -p abap-accelerator
-      - docker create --name temp abap-accelerator-q:3.2.1-node22
-      - docker cp temp:/app/. abap-accelerator/
-      - docker rm temp
-      - ls -la abap-accelerator/
 
   build:
     commands:
