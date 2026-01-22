@@ -4,6 +4,7 @@ env:
   variables:
     AWS_ACCOUNT_ID: "454953018734"
     AWS_REGION: "ap-northeast-1"
+    ECR_REPO_NAME: "abap-mcp"
 
 phases:
   install:
@@ -15,7 +16,8 @@ phases:
 
   pre_build:
     commands:
-      - ECR_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/abap-mcp
+      - export ECR_REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME"
+      - echo "ECR_REPO=$ECR_REPO"
       - echo Logging in to ECR...
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO
       - echo Fetching LFS files...
@@ -33,15 +35,15 @@ phases:
 
   build:
     commands:
-      - ECR_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/abap-mcp
+      - export ECR_REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME"
       - echo Building combined image...
       - docker build -t $ECR_REPO:latest .
       - docker tag $ECR_REPO:latest $ECR_REPO:$CODEBUILD_BUILD_NUMBER
 
   post_build:
     commands:
-      - ECR_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/abap-mcp
+      - export ECR_REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME"
       - echo Pushing to ECR...
       - docker push $ECR_REPO:latest
       - docker push $ECR_REPO:$CODEBUILD_BUILD_NUMBER
-      - echo "Build complete: $ECR_REPO:$CODEBUILD_BUILD_NUMBER"
+      - echo "Build complete"
