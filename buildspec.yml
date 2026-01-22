@@ -1,0 +1,38 @@
+version: 0.2
+
+env:
+  variables:
+    ECR_REPO: <account-id>.dkr.ecr.<region>.amazonaws.com/abap-mcp
+
+phases:
+  install:
+    commands:
+      - echo Installing Git LFS...
+      - curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash
+      - yum install -y git-lfs
+      - git lfs install
+
+  pre_build:
+    commands:
+      - echo Logging in to ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPO
+      - echo Fetching LFS files...
+      - git lfs pull
+      - echo Loading ABAP Accelerator image...
+      - docker load -i abap-accelerator-q-3.2.1-node22.tar
+      - mkdir -p abap-accelerator
+      - docker create --name temp abap-accelerator-q:3.2.1-node22
+      - docker cp temp:/app/. abap-accelerator/
+      - docker rm temp
+
+  build:
+    commands:
+      - echo Building combined image...
+      - docker build -t $ECR_REPO:latest .
+      - docker tag $ECR_REPO:latest $ECR_REPO:$CODEBUILD_BUILD_NUMBER
+
+  post_build:
+    commands:
+      - docker push $ECR_REPO:latest
+      - docker push $ECR_REPO:$CODEBUILD_BUILD_NUMBER
+      - echo "Image pushed: $ECR_REPO:$CODEBUILD_BUILD_NUMBER"
