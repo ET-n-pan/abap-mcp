@@ -1,12 +1,18 @@
-FROM python:3.11-slim
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
-RUN pip install --no-cache-dir mcp-proxy
+# Install Python and pip
+RUN yum install -y python3.11 python3.11-pip && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
+    ln -sf /usr/bin/pip3.11 /usr/bin/pip3
 
-RUN apt-get update && apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install mcp-proxy
+RUN pip3 install --no-cache-dir mcp-proxy
 
+# Install Node.js via NodeSource (AL2023 may not have node22 in repo)
+RUN curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - && \
+    yum install -y nodejs
+
+# Copy extracted ABAP Accelerator
 COPY abap-accelerator/ /app/abap-accelerator/
 
 WORKDIR /app
