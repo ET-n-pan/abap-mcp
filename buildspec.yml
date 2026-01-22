@@ -2,7 +2,8 @@ version: 0.2
 
 env:
   variables:
-    ECR_REPO: <account-id>.dkr.ecr.<region>.amazonaws.com/abap-mcp
+    AWS_ACCOUNT_ID: "454953018734"
+    AWS_REGION: "ap-northeast-1"
 
 phases:
   install:
@@ -14,25 +15,33 @@ phases:
 
   pre_build:
     commands:
+      - ECR_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/abap-mcp
       - echo Logging in to ECR...
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPO
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO
       - echo Fetching LFS files...
       - git lfs pull
+      - ls -la *.tar
       - echo Loading ABAP Accelerator image...
       - docker load -i abap-accelerator-q-3.2.1-node22.tar
+      - docker images
+      - echo Extracting app files...
       - mkdir -p abap-accelerator
       - docker create --name temp abap-accelerator-q:3.2.1-node22
       - docker cp temp:/app/. abap-accelerator/
       - docker rm temp
+      - ls -la abap-accelerator/
 
   build:
     commands:
+      - ECR_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/abap-mcp
       - echo Building combined image...
       - docker build -t $ECR_REPO:latest .
       - docker tag $ECR_REPO:latest $ECR_REPO:$CODEBUILD_BUILD_NUMBER
 
   post_build:
     commands:
+      - ECR_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/abap-mcp
+      - echo Pushing to ECR...
       - docker push $ECR_REPO:latest
       - docker push $ECR_REPO:$CODEBUILD_BUILD_NUMBER
-      - echo "Image pushed: $ECR_REPO:$CODEBUILD_BUILD_NUMBER"
+      - echo "Build complete: $ECR_REPO:$CODEBUILD_BUILD_NUMBER"
