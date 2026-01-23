@@ -5,7 +5,13 @@ USER root
 RUN apk add --no-cache python3 py3-pip && \
     pip3 install --no-cache-dir --break-system-packages mcp-proxy
 
+# Create secrets directory
+RUN mkdir -p /run/secrets
+
 EXPOSE 8080
 
-CMD ["mcp-proxy", "--port", "8080", "--host", "0.0.0.0", "--", \
-     "node", "dist/index.js"]
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

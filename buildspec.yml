@@ -30,6 +30,7 @@ phases:
     commands:
       - export ECR_REPO="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME"
       - echo Building combined image...
+      - ls -la Dockerfile entrypoint.sh
       - docker build -t $ECR_REPO:latest .
       - docker tag $ECR_REPO:latest $ECR_REPO:$CODEBUILD_BUILD_NUMBER
 

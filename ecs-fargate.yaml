@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ABAP Accelerator MCP Server on ECS Fargate
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC with VPN connectivity to SAP system
+  
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets with route to SAP system via VPN
+  
+  SapHost:
+    Type: String
+    Default: "10.1.1.122:8000"
+    Description: SAP host and port (no http:// prefix)
+  
+  SapClient:
+    Type: String
+    Default: "310"
+  
+  SapUsername:
+    Type: String
+    Default: "101674115"
+  
+  SapLanguage:
+    Type: String
+    Default: "JA"
+  
+  SapSecure:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Use HTTPS (true) or HTTP (false)
+
+Resources:
+  # Secrets Manager for SAP Password
+  SapPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: abap-mcp/sap-password
+      Description: SAP password for ABAP Accelerator MCP
+      SecretString: "REPLACE_WITH_ACTUAL_PASSWORD"
+
+  # ECS Cluster
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: abap-mcp-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+
+  # ECR Repository
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: abap-mcp
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  # Task Execution Role (for pulling images and secrets)
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: abap-mcp-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref SapPasswordSecret
+
+  # Task Role (for runtime permissions - minimal for now)
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: abap-mcp-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Security Group
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: abap-mcp-sg
+      GroupDescription: Security group for ABAP MCP Fargate task
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 10.0.0.0/8  # Adjust to your VPC CIDR
+          Description: MCP HTTP access
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 10.1.1.0/24  # SAP network - adjust as needed
+          Description: SAP HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound (ECR, Secrets Manager)
+
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/abap-mcp
+      RetentionInDays: 7
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: abap-mcp
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: abap-mcp
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/abap-mcp:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: SAP_HOST
+              Value: !Ref SapHost
+            - Name: SAP_CLIENT
+              Value: !Ref SapClient
+            - Name: SAP_USERNAME
+              Value: !Ref SapUsername
+            - Name: SAP_LANGUAGE
+              Value: !Ref SapLanguage
+            - Name: SAP_SECURE
+              Value: !Ref SapSecure
+          Secrets:
+            - Name: SAP_PASSWORD
+              ValueFrom: !Ref SapPasswordSecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: abap-mcp
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - "wget -q -O /dev/null http://localhost:8080/mcp || exit 1"
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  # ECS Service
+  EcsService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: abap-mcp-service
+      Cluster: !Ref EcsCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED  # Private subnet with NAT
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+      EnableExecuteCommand: true  # For debugging
+
+Outputs:
+  ClusterName:
+    Value: !Ref EcsCluster
+    Description: ECS Cluster name
+  
+  ServiceName:
+    Value: !GetAtt EcsService.Name
+    Description: ECS Service name
+  
+  EcrRepository:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/abap-mcp
+    Description: ECR repository URI
+  
+  SecretArn:
+    Value: !Ref SapPasswordSecret
+    Description: Secrets Manager ARN - update with actual password
+  
+  LogGroup:
+    Value: !Ref LogGroup
+    Description: CloudWatch Log Group for debugging
