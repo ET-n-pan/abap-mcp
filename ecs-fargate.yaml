@@ -1,5 +1,5 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: ABAP Accelerator MCP Server on ECS Fargate
+AWSTemplateFormatVersion: 2010-09-09
+Description: ABAP Accelerator MCP Server - Complete Stack with CodeBuild
 
 Parameters:
   VpcId:
@@ -9,6 +9,15 @@ Parameters:
   PrivateSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Private subnets with route to SAP system via VPN
+  
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository URL (HTTPS)
+    Default: "https://github.com/ET-n-pan/abap-mcp.git"
+  
+  GitHubBranch:
+    Type: String
+    Default: main
   
   SapHost:
     Type: String
@@ -31,26 +40,14 @@ Parameters:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Use HTTPS (true) or HTTP (false)
+
+  # Set to 0 for initial deployment, then update to 1 after image is built
+  DesiredCount:
+    Type: Number
+    Default: 0
+    Description: Set to 0 initially, update to 1 after CodeBuild completes
 
 Resources:
-  # Secrets Manager for SAP Password
-  SapPasswordSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: abap-mcp/sap-password
-      Description: SAP password for ABAP Accelerator MCP
-      SecretString: "REPLACE_WITH_ACTUAL_PASSWORD"
-
-  # ECS Cluster
-  EcsCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: abap-mcp-cluster
-      CapacityProviders:
-        - FARGATE
-        - FARGATE_SPOT
-
   # ECR Repository
   EcrRepository:
     Type: AWS::ECR::Repository
@@ -59,7 +56,95 @@ Resources:
       ImageScanningConfiguration:
         ScanOnPush: true
 
-  # Task Execution Role (for pulling images and secrets)
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: abap-mcp-codebuild-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: !GetAtt EcrRepository.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: "*"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: abap-mcp-build
+      Description: Build ABAP Accelerator MCP Docker image
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        PrivilegedMode: true  # Required for Docker
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+          - Name: ECR_REPO_NAME
+            Value: abap-mcp
+      Source:
+        Type: GITHUB
+        Location: !Ref GitHubRepo
+        BuildSpec: buildspec.yml
+        GitCloneDepth: 1
+      SourceVersion: !Ref GitHubBranch
+      TimeoutInMinutes: 30
+
+  # Secrets Manager
+  SapPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: abap-mcp/sap-password
+      Description: SAP password for ABAP Accelerator MCP
+      SecretString: "REPLACE_ME_AFTER_DEPLOYMENT"
+      KmsKeyId: alias/aws/secretsmanager
+  # ECS Cluster
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: abap-mcp-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -83,7 +168,6 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref SapPasswordSecret
 
-  # Task Role (for runtime permissions - minimal for now)
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -95,8 +179,19 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SSMForExecCommand
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
 
-  # Security Group
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -107,13 +202,13 @@ Resources:
         - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
-          CidrIp: 10.0.0.0/8  # Adjust to your VPC CIDR
-          Description: MCP HTTP access
+          CidrIp: 10.0.0.0/8
+          Description: MCP HTTP access from VPC
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 8000
           ToPort: 8000
-          CidrIp: 10.1.1.0/24  # SAP network - adjust as needed
+          CidrIp: 10.0.0.0/8
           Description: SAP HTTP access
         - IpProtocol: tcp
           FromPort: 443
@@ -121,16 +216,15 @@ Resources:
           CidrIp: 0.0.0.0/0
           Description: HTTPS outbound (ECR, Secrets Manager)
 
-  # CloudWatch Log Group
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/abap-mcp
       RetentionInDays: 7
 
-  # ECS Task Definition
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
+    DependsOn: EcrRepository
     Properties:
       Family: abap-mcp
       NetworkMode: awsvpc
@@ -167,14 +261,6 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: abap-mcp
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - "wget -q -O /dev/null http://localhost:8080/mcp || exit 1"
-            Interval: 30
-            Timeout: 5
-            Retries: 3
-            StartPeriod: 60
 
   # ECS Service
   EcsService:
@@ -183,33 +269,34 @@ Resources:
       ServiceName: abap-mcp-service
       Cluster: !Ref EcsCluster
       TaskDefinition: !Ref TaskDefinition
-      DesiredCount: 1
+      DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: DISABLED  # Private subnet with NAT
+          AssignPublicIp: ENABLED  # For testing - change to DISABLED with NAT for prod
           Subnets: !Ref PrivateSubnetIds
           SecurityGroups:
             - !Ref TaskSecurityGroup
-      EnableExecuteCommand: true  # For debugging
+      EnableExecuteCommand: true
 
 Outputs:
-  ClusterName:
-    Value: !Ref EcsCluster
-    Description: ECS Cluster name
-  
-  ServiceName:
-    Value: !GetAtt EcsService.Name
-    Description: ECS Service name
-  
   EcrRepository:
     Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/abap-mcp
     Description: ECR repository URI
   
+  CodeBuildProject:
+    Value: !Ref CodeBuildProject
+    Description: CodeBuild project name - trigger this first
+  
+  ClusterName:
+    Value: !Ref EcsCluster
+  
+  ServiceName:
+    Value: !GetAtt EcsService.Name
+  
   SecretArn:
     Value: !Ref SapPasswordSecret
-    Description: Secrets Manager ARN - update with actual password
+    Description: Update this secret with actual SAP password
   
   LogGroup:
     Value: !Ref LogGroup
-    Description: CloudWatch Log Group for debugging
