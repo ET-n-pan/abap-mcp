@@ -2,7 +2,7 @@ version: 0.2
 
 env:
   variables:
-    AWS_ACCOUNT_ID: "454953018734"
+    AWS_ACCOUNT_ID: "730335555874"
     AWS_REGION: "ap-northeast-1"
     ECR_REPO_NAME: "abap-mcp"
 

@@ -200,8 +200,8 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
+          FromPort: 3000
+          ToPort: 3000
           CidrIp: 10.0.0.0/8
           Description: MCP HTTP access from VPC
       SecurityGroupEgress:
@@ -239,7 +239,7 @@ Resources:
           Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/abap-mcp:latest
           Essential: true
           PortMappings:
-            - ContainerPort: 8080
+            - ContainerPort: 3000
               Protocol: tcp
           Environment:
             - Name: SAP_HOST
