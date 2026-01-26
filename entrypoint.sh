@@ -18,4 +18,4 @@ chmod 600 /run/secrets/sap_password
 
 # Start mcp-proxy
 cd /app
-exec mcp-proxy --port 8080 --host 0.0.0.0 -- node dist/index.js
+exec mcp-proxy --port 8080 --host 0.0.0.0 --pass-environment -- node dist/index.js
