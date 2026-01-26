@@ -8,7 +8,7 @@ RUN apk add --no-cache python3 py3-pip && \
 # Create secrets directory
 RUN mkdir -p /run/secrets
 
-EXPOSE 8080
+EXPOSE 3000
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

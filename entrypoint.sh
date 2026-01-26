@@ -14,8 +14,10 @@ EOF
 
 # Also write to secrets file (belt and suspenders)
 echo -n "$SAP_PASSWORD" > /run/secrets/sap_password
-chmod 600 /run/secrets/sap_password
+chmod 755 /run/secrets/sap_password
 
 # Start mcp-proxy
 cd /app
-exec mcp-proxy --port 8080 --host 0.0.0.0 -- node dist/index.js
+
+sleep 30
+exec mcp-proxy --port 3000 --host 0.0.0.0 -- node dist/index.js
