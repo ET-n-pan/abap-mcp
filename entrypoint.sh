@@ -12,4 +12,4 @@ SAP_PASSWORD=${SAP_PASSWORD}
 EOF
 
 cd /app
-exec npx -y supergateway --stdio "node dist/index.js" --port 8080 --cors
+exec npx -y supergateway --stdio "node dist/index.js" --port 8080 --outputTransport streamableHttp --cors
